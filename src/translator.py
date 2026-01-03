@@ -8,6 +8,7 @@ Uses Google's Gemini 1.5 Flash model for translation with:
 - Request delays to avoid rate limits
 """
 
+import os
 import re
 import time
 import logging
@@ -179,68 +180,69 @@ class Translator:
   - Michael → מייקל
   - Dr. Green → ד"ר גרין
   - Carter → קרטר
+  - Ross → רוס
+  - Rachel → רייצ'ל
   - County General → קאונטי ג'נרל
 
 - ONLY keep English for:
-  - Technical codes (DNA, HIV, CPR, EKG, IV)
-  - Abbreviations that are used in Hebrew too (OK, CT, MRI)
+  - Technical codes: DNA, HIV, CT, MRI, EKG
+  - Common abbreviations: OK
 
 ### 2. GENDER DETECTION - VERY IMPORTANT!
 Analyze the context carefully to determine speaker gender:
 
 **Clues for FEMALE speaker:**
-- Words like "she", "her", "actress", "mother", "sister", "wife", "girlfriend", "nurse" (often), "pregnant"
-- Female names mentioned as the speaker
+- Words like "she", "her", "actress", "mother", "sister", "wife", "girlfriend", "nurse", "pregnant"
+- Female names: Elizabeth, Susan, Carol, Rachel, Abby, Kerry, Cynthia
 - Response to "ma'am", "miss", "Mrs."
-- Context of previous lines mentioning a woman
+- Previous lines mentioning a woman
 
 **Clues for MALE speaker:**
 - Words like "he", "him", "actor", "father", "brother", "husband", "boyfriend"
-- Male names mentioned as the speaker
+- Male names: John, Mark, Doug, Peter, Carter, Benton, Greene
 - Response to "sir", "Mr."
-- Context of previous lines mentioning a man
+- Previous lines mentioning a man
 
 **Use correct Hebrew verb forms:**
-- Female: אמרתי, הלכתי, רציתי, עשיתי, ידעתי, חשבתי, אני רוצָה, אני יודעַת
-- Male: אמרתי, הלכתי, רציתי, עשיתי, ידעתי, חשבתי, אני רוצֶה, אני יודֵע
+- Female past: אמרתי, הלכתי, רציתי, עשיתי, ידעתי, חשבתי, הייתי
+- Female present: אני רוצָה, אני יודעַת, אני חושבת, אני עושָׂה
+- Male past: אמרתי, הלכתי, רציתי, עשיתי, ידעתי, חשבתי, הייתי
+- Male present: אני רוצֶה, אני יודֵע, אני חושב, אני עושֶׂה
 
-**When UNCLEAR:** Default to male, but look for ANY hint of gender in surrounding context.
+**When UNCLEAR:** Look at surrounding context. Default to male only if absolutely no hints.
 
 ### 3. NATURAL HEBREW
-- Use conversational, natural Hebrew - not formal/literary
-- Use common Israeli slang where appropriate
-- Contractions are OK: מה קורה, איך הולך, תגיד לי
-- Keep subtitles concise - suitable for reading quickly
+- Use conversational, natural Israeli Hebrew
+- Contractions are OK: מה קורה, איך הולך, תגיד לי, מה נשמע
+- Keep subtitles concise for quick reading
+- Medical drama tone: professional but human
 
-### 4. MEDICAL TERMS (translate to Hebrew):
-- Doctor / Dr. → דוקטור / ד"ר
-- Nurse → אחות / אח
-- Emergency Room / ER → חדר מיון
+### 4. MEDICAL TERMS (for ER)
+- Doctor → דוקטור / ד"ר
+- Nurse → אחות (f) / אח (m)
+- Patient → מטופל / מטופלת
+- ER / Emergency Room → חדר מיון
 - Surgery → ניתוח
+- Trauma → טראומה
 - IV → עירוי
 - Blood pressure → לחץ דם
-- X-ray → צילום רנטגן
-- CPR → החייאה
-- Epinephrine → אפינפרין
+- Heart rate → דופק
+- Intubation → אינטובציה
 - cc / ml → סמ"ק
+- mg → מ"ג
 - Stat! → מיד! / עכשיו!
-
-### 5. CONTEXT AWARENESS
-- Use the previous lines (context) to understand:
-  - WHO is speaking (male/female)
-  - WHAT is the situation
-  - The TONE (angry, sad, happy, sarcastic)
-- Maintain consistency in character voice
+- Code Blue → קוד כחול
+- Crash cart → עגלת החייאה
+- Suture → תפר
+- Laceration → קרע / חתך
 
 {f'### CONTEXT (previous subtitles - DO NOT translate, use for understanding only):' + chr(10) + context_text if context_text else ''}
 
-### TRANSLATE THESE LINES:
-Return exactly {len(batch)} lines, one translation per line, in the same order.
-
+### TRANSLATE THESE {len(batch)} LINES:
 {text_to_translate}
 
 ### OUTPUT:
-Hebrew translations only, one per line, same order as input:"""
+Return exactly {len(batch)} Hebrew translations, one per line, same order as input:"""
 
         # Retry logic for rate limits
         for attempt in range(self.config.max_retries):
@@ -481,9 +483,17 @@ if __name__ == "__main__":
     import sys
     logging.basicConfig(level=logging.INFO)
 
-    # Test API connection with paid account key
-    api_key = "REDACTED_API_KEY"
+    # Load API key from environment variable
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    api_key = os.environ.get('GEMINI_API_KEY', '')
     model = "gemini-2.0-flash"
+
+    if not api_key:
+        print("Error: GEMINI_API_KEY environment variable not set.")
+        print("Please create a .env file with: GEMINI_API_KEY=your_key_here")
+        sys.exit(1)
 
     print("Testing Gemini API connection...")
     print(f"Using model: {model}")

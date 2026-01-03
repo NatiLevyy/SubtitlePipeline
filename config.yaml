@@ -17,6 +17,6 @@ processing:
   keep_temp_files: false
 
 api:
-  gemini_key: "REDACTED_API_KEY"
+  # API key is loaded from .env file (GEMINI_API_KEY environment variable)
   gemini_model: "gemini-2.0-flash"
   batch_size: 25

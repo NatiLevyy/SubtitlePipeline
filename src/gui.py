@@ -4,6 +4,7 @@ Hebrew Subtitle Pipeline - GUI Application
 PyQt5-based graphical user interface with:
 - Pipeline tab: Mode selector (Sync Only | RTL Fix Only | Embed Only | Full Pipeline)
 - Translate tab: English to Hebrew translation using Gemini API
+- Full Process tab: Complete workflow (Translate → Sync → RTL Fix → Embed)
 - Settings tab: Tool paths and API configuration
 - Drag & drop folder selection
 - Progress bar and log area
@@ -11,9 +12,14 @@ PyQt5-based graphical user interface with:
 
 import sys
 import os
+import shutil
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import yaml
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -26,6 +32,10 @@ from PyQt5.QtGui import QDragEnterEvent, QDropEvent, QFont, QIcon
 
 from pipeline import Pipeline, PipelineMode, PipelineConfig, ProcessingResult
 from translator import Translator, TranslatorConfig, TranslationResult, TranslationError, test_api_connection
+from matcher import match_episodes
+from sync import sync_subtitle, SyncError, find_alass
+from rtl_fixer import fix_rtl_file, RTLFixError
+from muxer import mux_subtitle, MuxError, find_mkvmerge
 
 
 def get_resource_path(relative_path: str) -> Path:
@@ -133,6 +143,239 @@ class TranslationWorker(QThread):
             self.translator.cancel()
 
 
+class FullProcessWorker(QThread):
+    """
+    Worker thread for running the complete workflow:
+    Translate → Sync → RTL Fix → Embed
+    """
+    progress = pyqtSignal(str, int, int, int)  # message, stage, current, total
+    log = pyqtSignal(str, str)  # message, level
+    finished = pyqtSignal(dict)  # results dict
+
+    def __init__(
+        self,
+        english_srt_folder: Path,
+        season_folder: Path,
+        translator_config: TranslatorConfig,
+        pipeline_config: PipelineConfig,
+        keep_temp_files: bool = False
+    ):
+        super().__init__()
+        self.english_srt_folder = english_srt_folder
+        self.season_folder = season_folder
+        self.translator_config = translator_config
+        self.pipeline_config = pipeline_config
+        self.keep_temp_files = keep_temp_files
+        self._cancelled = False
+        self._translator: Optional[Translator] = None
+
+    def cancel(self):
+        """Cancel the operation."""
+        self._cancelled = True
+        if self._translator:
+            self._translator.cancel()
+
+    def _log(self, message: str, level: str = "info"):
+        self.log.emit(message, level)
+
+    def _progress(self, message: str, stage: int, current: int, total: int):
+        self.progress.emit(message, stage, current, total)
+
+    def run(self):
+        """Run the complete workflow."""
+        results = {
+            'success': False,
+            'translated': 0,
+            'synced': 0,
+            'rtl_fixed': 0,
+            'embedded': 0,
+            'failed': [],
+            'output_folder': None
+        }
+
+        try:
+            # ═══════════════════════════════════════════════════════
+            # STAGE 1: TRANSLATION
+            # ═══════════════════════════════════════════════════════
+            self._log("═══ STAGE 1: TRANSLATION ═══", "info")
+
+            hebrew_folder = self.season_folder / self.pipeline_config.subtitle_folder_name
+            hebrew_folder.mkdir(parents=True, exist_ok=True)
+
+            # Find English SRT files
+            english_files = sorted(self.english_srt_folder.glob("*.srt"))
+            if not english_files:
+                raise Exception("No English SRT files found")
+
+            self._log(f"Found {len(english_files)} English SRT files", "info")
+
+            # Create translator
+            self._translator = Translator(
+                config=self.translator_config,
+                progress_callback=lambda msg, cur, tot: self._progress(msg, 1, cur, tot),
+                log_callback=self._log
+            )
+
+            # Translate each file
+            for i, srt_file in enumerate(english_files):
+                if self._cancelled:
+                    raise Exception("Operation cancelled")
+
+                self._progress(f"Translating {srt_file.name}", 1, i + 1, len(english_files))
+
+                try:
+                    output_path = hebrew_folder / srt_file.name
+                    self._translator.translate_file(srt_file, output_path)
+                    results['translated'] += 1
+                    self._log(f"✓ Translated: {srt_file.name}", "success")
+                except Exception as e:
+                    results['failed'].append(('translate', srt_file.name, str(e)))
+                    self._log(f"✗ Translation failed: {srt_file.name} - {e}", "error")
+
+            self._log(f"Translation complete: {results['translated']} files", "info")
+
+            # ═══════════════════════════════════════════════════════
+            # STAGE 2: SYNC
+            # ═══════════════════════════════════════════════════════
+            self._log("═══ STAGE 2: SYNC ═══", "info")
+
+            # Match episodes - use subtitle folder name since we just created it
+            matches = match_episodes(self.season_folder, self.pipeline_config.subtitle_folder_name)
+            if not matches:
+                raise Exception("No episode matches found between MKV and SRT files")
+
+            self._log(f"Matched {len(matches)} episodes", "info")
+
+            # Create temp synced folder
+            synced_folder = self.season_folder / "temp_synced"
+            synced_folder.mkdir(parents=True, exist_ok=True)
+
+            # Find alass
+            alass_path = find_alass(self.pipeline_config.alass_path)
+
+            for i, match in enumerate(matches):
+                if self._cancelled:
+                    raise Exception("Operation cancelled")
+
+                mkv_file = match['mkv']
+                srt_file = match['srt']
+                episode_id = f"S{match['season']:02d}E{match['episode']:02d}"
+
+                self._progress(f"Syncing {srt_file.name}", 2, i + 1, len(matches))
+
+                try:
+                    synced_path = synced_folder / srt_file.name
+                    sync_subtitle(mkv_file, srt_file, synced_path, alass_path)
+                    results['synced'] += 1
+                    self._log(f"✓ [{episode_id}] Synced: {srt_file.name}", "success")
+                except Exception as e:
+                    results['failed'].append(('sync', srt_file.name, str(e)))
+                    self._log(f"✗ [{episode_id}] Sync failed: {srt_file.name} - {e}", "error")
+                    # Copy original to synced folder so we can continue
+                    shutil.copy(srt_file, synced_folder / srt_file.name)
+
+            self._log(f"Sync complete: {results['synced']} files", "info")
+
+            # ═══════════════════════════════════════════════════════
+            # STAGE 3: RTL FIX
+            # ═══════════════════════════════════════════════════════
+            self._log("═══ STAGE 3: RTL FIX ═══", "info")
+
+            # Create temp RTL fixed folder
+            rtl_folder = self.season_folder / "temp_rtl_fixed"
+            rtl_folder.mkdir(parents=True, exist_ok=True)
+
+            synced_files = sorted(synced_folder.glob("*.srt"))
+
+            for i, srt_file in enumerate(synced_files):
+                if self._cancelled:
+                    raise Exception("Operation cancelled")
+
+                self._progress(f"Fixing RTL: {srt_file.name}", 3, i + 1, len(synced_files))
+
+                try:
+                    fixed_path = rtl_folder / srt_file.name
+                    fix_rtl_file(srt_file, fixed_path)
+                    results['rtl_fixed'] += 1
+                    self._log(f"✓ RTL fixed: {srt_file.name}", "success")
+                except Exception as e:
+                    results['failed'].append(('rtl_fix', srt_file.name, str(e)))
+                    self._log(f"✗ RTL fix failed: {srt_file.name} - {e}", "error")
+                    # Copy original so we can continue
+                    shutil.copy(srt_file, rtl_folder / srt_file.name)
+
+            self._log(f"RTL fix complete: {results['rtl_fixed']} files", "info")
+
+            # ═══════════════════════════════════════════════════════
+            # STAGE 4: EMBED INTO MKV
+            # ═══════════════════════════════════════════════════════
+            self._log("═══ STAGE 4: EMBED ═══", "info")
+
+            output_folder = self.season_folder / self.pipeline_config.output_folder_name
+            output_folder.mkdir(parents=True, exist_ok=True)
+
+            # Find mkvmerge
+            mkvmerge_path = find_mkvmerge(self.pipeline_config.mkvmerge_path)
+
+            for i, match in enumerate(matches):
+                if self._cancelled:
+                    raise Exception("Operation cancelled")
+
+                mkv_file = match['mkv']
+                srt_file = match['srt']
+                episode_id = f"S{match['season']:02d}E{match['episode']:02d}"
+
+                self._progress(f"Embedding: {mkv_file.name}", 4, i + 1, len(matches))
+
+                try:
+                    fixed_srt = rtl_folder / srt_file.name
+                    if not fixed_srt.exists():
+                        raise Exception(f"RTL fixed subtitle not found: {fixed_srt}")
+
+                    output_mkv = output_folder / mkv_file.name
+                    mux_subtitle(
+                        mkv_file,
+                        fixed_srt,
+                        output_mkv,
+                        mkvmerge_path,
+                        self.pipeline_config.subtitle_language,
+                        self.pipeline_config.subtitle_track_name,
+                        self.pipeline_config.default_subtitle
+                    )
+                    results['embedded'] += 1
+                    self._log(f"✓ [{episode_id}] Embedded: {mkv_file.name}", "success")
+                except Exception as e:
+                    results['failed'].append(('embed', mkv_file.name, str(e)))
+                    self._log(f"✗ [{episode_id}] Embed failed: {mkv_file.name} - {e}", "error")
+
+            self._log(f"Embed complete: {results['embedded']} files", "info")
+
+            # ═══════════════════════════════════════════════════════
+            # CLEANUP
+            # ═══════════════════════════════════════════════════════
+            if not self.keep_temp_files:
+                self._log("Cleaning up temporary files...", "info")
+                shutil.rmtree(synced_folder, ignore_errors=True)
+                shutil.rmtree(rtl_folder, ignore_errors=True)
+
+            results['success'] = True
+            results['output_folder'] = output_folder
+
+            self._log("═══ FULL PROCESS COMPLETE ═══", "success")
+            self._log(f"Output: {output_folder}", "info")
+            self._log(f"Translated: {results['translated']}, Synced: {results['synced']}, "
+                     f"RTL Fixed: {results['rtl_fixed']}, Embedded: {results['embedded']}", "info")
+
+            if results['failed']:
+                self._log(f"⚠ {len(results['failed'])} errors occurred", "warning")
+
+        except Exception as e:
+            self._log(f"✗ Critical error: {e}", "error")
+            results['success'] = False
+
+        self.finished.emit(results)
+
+
 class DropLabel(QLabel):
     """Label that accepts drag and drop."""
 
@@ -208,6 +451,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.worker: Optional[PipelineWorker] = None
         self.translation_worker: Optional[TranslationWorker] = None
+        self.full_process_worker: Optional[FullProcessWorker] = None
         self.config_path = get_resource_path("config.yaml")
 
         self.setWindowTitle("Hebrew Subtitle Pipeline")
@@ -259,6 +503,11 @@ class MainWindow(QMainWindow):
         translate_tab = QWidget()
         tabs.addTab(translate_tab, "Translate")
         self.setup_translate_tab(translate_tab)
+
+        # Full Process tab
+        full_process_tab = QWidget()
+        tabs.addTab(full_process_tab, "Full Process")
+        self.setup_full_process_tab(full_process_tab)
 
         # Settings tab
         settings_tab = QWidget()
@@ -531,6 +780,180 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(translate_button_layout)
 
+    def setup_full_process_tab(self, tab: QWidget):
+        """Setup the Full Process tab - complete workflow."""
+        layout = QVBoxLayout(tab)
+
+        # Header
+        header_label = QLabel("FULL PROCESS - Complete Workflow")
+        header_label.setStyleSheet("""
+            QLabel {
+                font-size: 16px;
+                font-weight: bold;
+                color: #0078d4;
+                padding: 10px;
+                background-color: #e8f4fc;
+                border-radius: 4px;
+            }
+        """)
+        layout.addWidget(header_label)
+
+        workflow_label = QLabel("English SRT → Translate → Sync → RTL Fix → Embed → Final MKV")
+        workflow_label.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
+        layout.addWidget(workflow_label)
+
+        # Source folder (English subtitles)
+        source_group = QGroupBox("Source (English Subtitles)")
+        source_layout = QVBoxLayout(source_group)
+
+        source_input_layout = QHBoxLayout()
+        source_input_layout.addWidget(QLabel("Folder:"))
+        self.fp_source_edit = QLineEdit()
+        self.fp_source_edit.setPlaceholderText("Folder containing English SRT files...")
+        self.fp_source_edit.textChanged.connect(self.update_fp_source_count)
+        source_input_layout.addWidget(self.fp_source_edit, 1)
+        fp_source_browse_btn = QPushButton("Browse...")
+        fp_source_browse_btn.clicked.connect(self.browse_fp_source)
+        source_input_layout.addWidget(fp_source_browse_btn)
+        source_layout.addLayout(source_input_layout)
+
+        # Drop zone for source
+        self.fp_source_drop = DropLabel("Drag and drop English SRT folder here")
+        self.fp_source_drop.dropped.connect(self.on_fp_source_dropped)
+        source_layout.addWidget(self.fp_source_drop)
+
+        # File count label
+        self.fp_source_count_label = QLabel("")
+        source_layout.addWidget(self.fp_source_count_label)
+
+        layout.addWidget(source_group)
+
+        # Target folder (Season folder with MKVs)
+        target_group = QGroupBox("Target (Season folder with MKV files)")
+        target_layout = QVBoxLayout(target_group)
+
+        target_input_layout = QHBoxLayout()
+        target_input_layout.addWidget(QLabel("Folder:"))
+        self.fp_target_edit = QLineEdit()
+        self.fp_target_edit.setPlaceholderText("Season folder containing MKV files...")
+        self.fp_target_edit.textChanged.connect(self.update_fp_target_info)
+        target_input_layout.addWidget(self.fp_target_edit, 1)
+        fp_target_browse_btn = QPushButton("Browse...")
+        fp_target_browse_btn.clicked.connect(self.browse_fp_target)
+        target_input_layout.addWidget(fp_target_browse_btn)
+        target_layout.addLayout(target_input_layout)
+
+        # Drop zone for target
+        self.fp_target_drop = DropLabel("Drag and drop season folder here")
+        self.fp_target_drop.dropped.connect(self.on_fp_target_dropped)
+        target_layout.addWidget(self.fp_target_drop)
+
+        # Info labels
+        self.fp_mkv_count_label = QLabel("")
+        target_layout.addWidget(self.fp_mkv_count_label)
+        self.fp_match_label = QLabel("")
+        target_layout.addWidget(self.fp_match_label)
+
+        layout.addWidget(target_group)
+
+        # Progress section
+        progress_group = QGroupBox("Progress")
+        progress_layout = QVBoxLayout(progress_group)
+
+        # Stage indicators
+        stage_layout = QHBoxLayout()
+        self.fp_stage_labels = []
+        stages = ["Translate", "Sync", "RTL Fix", "Embed"]
+        for stage in stages:
+            label = QLabel(f"○ {stage}")
+            label.setStyleSheet("color: #888;")
+            self.fp_stage_labels.append(label)
+            stage_layout.addWidget(label)
+        stage_layout.addStretch()
+        progress_layout.addLayout(stage_layout)
+
+        # Overall progress bar
+        overall_layout = QHBoxLayout()
+        overall_layout.addWidget(QLabel("Overall:"))
+        self.fp_overall_progress = QProgressBar()
+        self.fp_overall_progress.setMinimum(0)
+        self.fp_overall_progress.setMaximum(100)
+        self.fp_overall_progress.setValue(0)
+        overall_layout.addWidget(self.fp_overall_progress, 1)
+        progress_layout.addLayout(overall_layout)
+
+        # Current progress bar
+        current_layout = QHBoxLayout()
+        current_layout.addWidget(QLabel("Current:"))
+        self.fp_current_progress = QProgressBar()
+        self.fp_current_progress.setMinimum(0)
+        self.fp_current_progress.setMaximum(100)
+        self.fp_current_progress.setValue(0)
+        current_layout.addWidget(self.fp_current_progress, 1)
+        progress_layout.addLayout(current_layout)
+
+        # Status label
+        self.fp_status_label = QLabel("Ready")
+        progress_layout.addWidget(self.fp_status_label)
+
+        layout.addWidget(progress_group)
+
+        # Log area
+        log_group = QGroupBox("Log")
+        log_layout = QVBoxLayout(log_group)
+
+        self.fp_log_text = QTextEdit()
+        self.fp_log_text.setReadOnly(True)
+        self.fp_log_text.setFont(QFont("Consolas", 9))
+        self.fp_log_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                border: 1px solid #3c3c3c;
+            }
+        """)
+        log_layout.addWidget(self.fp_log_text)
+
+        clear_log_btn = QPushButton("Clear Log")
+        clear_log_btn.clicked.connect(self.fp_log_text.clear)
+        log_layout.addWidget(clear_log_btn)
+
+        layout.addWidget(log_group, 1)
+
+        # Action buttons
+        button_layout = QHBoxLayout()
+
+        button_layout.addStretch()
+
+        self.fp_cancel_btn = QPushButton("Cancel")
+        self.fp_cancel_btn.setEnabled(False)
+        self.fp_cancel_btn.clicked.connect(self.cancel_full_process)
+        button_layout.addWidget(self.fp_cancel_btn)
+
+        self.fp_run_btn = QPushButton("Start Full Process")
+        self.fp_run_btn.setDefault(True)
+        self.fp_run_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #5c2d91;
+                color: white;
+                padding: 10px 25px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #4a2377;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
+        self.fp_run_btn.clicked.connect(self.run_full_process)
+        button_layout.addWidget(self.fp_run_btn)
+
+        layout.addLayout(button_layout)
+
     def setup_settings_tab(self, tab: QWidget):
         """Setup the settings tab."""
         layout = QVBoxLayout(tab)
@@ -647,8 +1070,9 @@ class MainWindow(QMainWindow):
         self.default_sub_check.setChecked(settings.get('default_subtitle', True))
         self.keep_temp_check.setChecked(processing.get('keep_temp_files', False))
 
-        # API settings
-        self.api_key_edit.setText(api.get('gemini_key', ''))
+        # API settings - prefer environment variable over config file
+        env_api_key = os.environ.get('GEMINI_API_KEY', '')
+        self.api_key_edit.setText(env_api_key or api.get('gemini_key', ''))
         self.api_model_edit.setText(api.get('gemini_model', 'gemini-2.0-flash'))
         self.batch_size_edit.setText(str(api.get('batch_size', 25)))
 
@@ -669,8 +1093,8 @@ class MainWindow(QMainWindow):
         self.config['processing'] = {
             'keep_temp_files': self.keep_temp_check.isChecked(),
         }
+        # Don't save API key to config file - it should stay in .env
         self.config['api'] = {
-            'gemini_key': self.api_key_edit.text(),
             'gemini_model': self.api_model_edit.text() or 'gemini-2.0-flash',
             'batch_size': int(self.batch_size_edit.text() or '25'),
         }
@@ -1043,6 +1467,240 @@ class MainWindow(QMainWindow):
             for r in results:
                 if not r.success:
                     self.translate_log(f"  Failed: {r.input_file.name} - {r.error_message}", "error")
+
+    # ==================== Full Process Tab Methods ====================
+
+    def fp_log(self, message: str, level: str = "info"):
+        """Add message to full process log area."""
+        colors = {
+            "info": "#d4d4d4",
+            "warning": "#dcdcaa",
+            "error": "#f14c4c",
+            "success": "#4ec9b0",
+        }
+        color = colors.get(level, "#d4d4d4")
+        self.fp_log_text.append(f'<span style="color: {color}">{message}</span>')
+
+    def browse_fp_source(self):
+        """Browse for source folder (English subtitles)."""
+        path = QFileDialog.getExistingDirectory(self, "Select English Subtitles Folder")
+        if path:
+            self.fp_source_edit.setText(path)
+            self.fp_source_drop.setText(f"Selected: {Path(path).name}")
+            self.update_fp_source_count()
+
+    def browse_fp_target(self):
+        """Browse for target folder (season folder with MKVs)."""
+        path = QFileDialog.getExistingDirectory(self, "Select Season Folder")
+        if path:
+            self.fp_target_edit.setText(path)
+            self.fp_target_drop.setText(f"Selected: {Path(path).name}")
+            self.update_fp_target_info()
+
+    def on_fp_source_dropped(self, path: str):
+        """Handle source folder dropped."""
+        self.fp_source_edit.setText(path)
+        self.fp_source_drop.setText(f"Selected: {Path(path).name}")
+        self.update_fp_source_count()
+
+    def on_fp_target_dropped(self, path: str):
+        """Handle target folder dropped."""
+        self.fp_target_edit.setText(path)
+        self.fp_target_drop.setText(f"Selected: {Path(path).name}")
+        self.update_fp_target_info()
+
+    def update_fp_source_count(self):
+        """Update the source file count label."""
+        source_path = self.fp_source_edit.text().strip()
+        if source_path and Path(source_path).exists():
+            srt_files = list(Path(source_path).glob("*.srt"))
+            count = len(srt_files)
+            self.fp_source_count_label.setText(f"Found: {count} English SRT file(s)")
+            self.fp_source_count_label.setStyleSheet(
+                "color: #4ec9b0;" if count > 0 else "color: #f14c4c;"
+            )
+        else:
+            self.fp_source_count_label.setText("")
+
+    def update_fp_target_info(self):
+        """Update the target folder info labels."""
+        target_path = self.fp_target_edit.text().strip()
+        if target_path and Path(target_path).exists():
+            mkv_files = list(Path(target_path).glob("*.mkv"))
+            count = len(mkv_files)
+            self.fp_mkv_count_label.setText(f"Found: {count} MKV file(s)")
+            self.fp_mkv_count_label.setStyleSheet(
+                "color: #4ec9b0;" if count > 0 else "color: #f14c4c;"
+            )
+
+            # Show output folder preview
+            output_folder = self.output_folder_edit.text() or "Output"
+            self.fp_match_label.setText(f"Output: {Path(target_path) / output_folder}")
+            self.fp_match_label.setStyleSheet("color: #666;")
+        else:
+            self.fp_mkv_count_label.setText("")
+            self.fp_match_label.setText("")
+
+    def run_full_process(self):
+        """Start the full process operation."""
+        source_path = self.fp_source_edit.text().strip()
+        target_path = self.fp_target_edit.text().strip()
+
+        if not source_path:
+            QMessageBox.warning(self, "Source Required", "Please select a source folder with English subtitles.")
+            return
+
+        if not target_path:
+            QMessageBox.warning(self, "Target Required", "Please select a target folder with MKV files.")
+            return
+
+        source_path = Path(source_path)
+        target_path = Path(target_path)
+
+        if not source_path.exists():
+            QMessageBox.warning(self, "Invalid Path", f"Source folder does not exist: {source_path}")
+            return
+
+        if not target_path.exists():
+            QMessageBox.warning(self, "Invalid Path", f"Target folder does not exist: {target_path}")
+            return
+
+        # Check for SRT files
+        srt_files = list(source_path.glob("*.srt"))
+        if not srt_files:
+            QMessageBox.warning(self, "No Files", "No SRT files found in source folder.")
+            return
+
+        # Check for MKV files
+        mkv_files = list(target_path.glob("*.mkv"))
+        if not mkv_files:
+            QMessageBox.warning(self, "No Files", "No MKV files found in target folder.")
+            return
+
+        # Check API key
+        translator_config = self.get_translator_config()
+        if not translator_config.api_key:
+            QMessageBox.warning(
+                self,
+                "API Key Required",
+                "Please enter your Gemini API key in the Settings tab."
+            )
+            return
+
+        # Verify tools
+        pipeline_config = self.get_pipeline_config()
+        try:
+            find_alass(pipeline_config.alass_path)
+        except FileNotFoundError:
+            QMessageBox.warning(
+                self,
+                "alass Not Found",
+                "alass tool is required for syncing. Please configure it in Settings."
+            )
+            return
+
+        try:
+            find_mkvmerge(pipeline_config.mkvmerge_path)
+        except FileNotFoundError:
+            QMessageBox.warning(
+                self,
+                "mkvmerge Not Found",
+                "mkvmerge tool is required for embedding. Please configure it in Settings."
+            )
+            return
+
+        # Reset progress UI
+        for label in self.fp_stage_labels:
+            label.setStyleSheet("color: #888;")
+        self.fp_overall_progress.setValue(0)
+        self.fp_current_progress.setValue(0)
+
+        # Start worker thread
+        self.full_process_worker = FullProcessWorker(
+            source_path,
+            target_path,
+            translator_config,
+            pipeline_config,
+            self.keep_temp_check.isChecked()
+        )
+        self.full_process_worker.progress.connect(self.on_fp_progress)
+        self.full_process_worker.log.connect(self.fp_log)
+        self.full_process_worker.finished.connect(self.on_fp_finished)
+
+        self.fp_run_btn.setEnabled(False)
+        self.fp_cancel_btn.setEnabled(True)
+        self.fp_status_label.setText("Starting full process...")
+        self.fp_log(f"Starting full process: {len(srt_files)} files...", "info")
+
+        self.full_process_worker.start()
+
+    def cancel_full_process(self):
+        """Cancel the full process operation."""
+        if self.full_process_worker:
+            self.full_process_worker.cancel()
+            self.fp_log("Cancelling operation...", "warning")
+
+    def on_fp_progress(self, message: str, stage: int, current: int, total: int):
+        """Handle full process progress updates."""
+        # Update stage indicators
+        stages = ["Translate", "Sync", "RTL Fix", "Embed"]
+        for i, label in enumerate(self.fp_stage_labels):
+            if i + 1 < stage:
+                label.setText(f"✓ {stages[i]}")
+                label.setStyleSheet("color: #4ec9b0;")
+            elif i + 1 == stage:
+                label.setText(f"● {stages[i]}")
+                label.setStyleSheet("color: #0078d4; font-weight: bold;")
+            else:
+                label.setText(f"○ {stages[i]}")
+                label.setStyleSheet("color: #888;")
+
+        # Update current progress
+        if total > 0:
+            percent = int((current / total) * 100)
+            self.fp_current_progress.setValue(percent)
+
+        # Calculate overall progress
+        # Stage weights: Translate 40%, Sync 20%, RTL 20%, Embed 20%
+        stage_weights = {1: (0, 40), 2: (40, 60), 3: (60, 80), 4: (80, 100)}
+        if stage in stage_weights:
+            start, end = stage_weights[stage]
+            if total > 0:
+                stage_progress = (current / total) * (end - start)
+                overall = int(start + stage_progress)
+                self.fp_overall_progress.setValue(overall)
+
+        self.fp_status_label.setText(f"Stage {stage}/4: {message} ({current}/{total})")
+
+    def on_fp_finished(self, results: dict):
+        """Handle full process completion."""
+        self.fp_run_btn.setEnabled(True)
+        self.fp_cancel_btn.setEnabled(False)
+        self.fp_overall_progress.setValue(100)
+        self.fp_current_progress.setValue(100)
+
+        # Mark all stages complete
+        stages = ["Translate", "Sync", "RTL Fix", "Embed"]
+        for i, label in enumerate(self.fp_stage_labels):
+            label.setText(f"✓ {stages[i]}")
+            label.setStyleSheet("color: #4ec9b0;")
+
+        if results['success']:
+            self.fp_status_label.setText(
+                f"Complete: {results['embedded']} files processed"
+            )
+            self.fp_log(
+                f"Full process complete! Output: {results['output_folder']}",
+                "success"
+            )
+        else:
+            self.fp_status_label.setText("Process failed or incomplete")
+            self.fp_log("Process failed or was cancelled", "error")
+
+        if results['failed']:
+            self.fp_log(f"⚠ {len(results['failed'])} errors occurred:", "warning")
+            for stage, filename, error in results['failed']:
+                self.fp_log(f"  [{stage}] {filename}: {error}", "error")
 
 
 def main():
