@@ -2,18 +2,14 @@
 
 ## Project Overview
 
-Build a **modular GUI application** (with standalone EXE) with **TWO separate workflows**:
+Build a **modular GUI application** (with standalone EXE) with **FOUR tabs**:
 
-### Tab 1: Pipeline (Existing - DO NOT CHANGE)
-Process Hebrew subtitles that **already exist** in `Subtitle_HEBREW` folder:
-- **Sync** → **RTL Fix** → **Embed into MKV**
-
-### Tab 2: Translate (NEW - Separate workflow)
-Translate English subtitles to Hebrew and **create** the `Subtitle_HEBREW` folder:
-- **Input:** English SRT files from any location
-- **Output:** Hebrew SRT files in a new `Subtitle_HEBREW` folder
-
-These are **completely separate workflows** that do NOT interfere with each other.
+| Tab | Purpose |
+|-----|---------|
+| **Pipeline** | Process existing Hebrew subs: Sync → RTL Fix → Embed |
+| **Translate** | Translate English → Hebrew (creates Subtitle_HEBREW folder) |
+| **Full Process** | **Complete workflow:** Translate → Sync → RTL Fix → Embed |
+| **Settings** | Configuration |
 
 ---
 
@@ -33,26 +29,31 @@ These are **completely separate workflows** that do NOT interfere with each othe
 | alass | `G:\Projects\SubtitlePipeline\tools\alass.exe` | Subtitle synchronization |
 | Python | System PATH | Script execution |
 
-### API Key (Pre-configured for Translation)
+### API Key Configuration
 
+API key is stored in `.env` file (not in git):
 ```
-GEMINI_API_KEY = "REDACTED_API_KEY"
+GEMINI_API_KEY=your_api_key_here
 ```
+
+Get your API key from: https://aistudio.google.com/app/apikey
+
+**Model:** `gemini-2.0-flash` (recommended for paid accounts)
 
 ---
 
-# PART 1: PIPELINE TAB (Existing Workflow)
+# PART 1: PIPELINE TAB
 
-## This is the ORIGINAL workflow - DO NOT MODIFY
+## Process existing Hebrew subtitles (Subtitle_HEBREW must exist)
 
-### Input Structure for Pipeline Tab
+### Input Structure
 
 ```
 📁 Season Folder (e.g., "עונה 6")/
 │
 ├── 📁 Subtitle_HEBREW/              ← Hebrew subtitles MUST exist here
-│   ├── ER - 6x01 - Leave It to Weaver.en.srt
-│   ├── ER - 6x02 - Last Rites.en.srt
+│   ├── ER - 6x01 - Leave It to Weaver.srt
+│   ├── ER - 6x02 - Last Rites.srt
 │   └── ...
 │
 ├── ER.1994.S06E01.720p.AMZN.WEB-DL.x265-HETeam.mkv
@@ -60,7 +61,7 @@ GEMINI_API_KEY = "REDACTED_API_KEY"
 └── ...
 ```
 
-### Pipeline Tab - 3 Steps (Original)
+### Pipeline - 3 Steps
 
 #### Step 1: Sync (alass)
 ```bash
@@ -72,10 +73,10 @@ Automate SubtitleEdit: Ctrl+A → Edit → "Reverse RTL start/end"
 
 #### Step 3: Embed (mkvmerge)
 ```bash
-mkvmerge.exe -o "output.mkv" "input.mkv" --language 0:heb --track-name 0:"Hebrew" "subtitle.srt"
+mkvmerge.exe -o "output.mkv" "input.mkv" --language 0:heb --track-name 0:"Hebrew" --default-track 0:yes "subtitle.srt"
 ```
 
-### Pipeline Tab - Operation Modes
+### Pipeline - Operation Modes
 
 | Mode | Steps |
 |------|-------|
@@ -97,327 +98,379 @@ mkvmerge.exe -o "output.mkv" "input.mkv" --language 0:heb --track-name 0:"Hebrew
 
 ---
 
-# PART 2: TRANSLATE TAB (NEW - Separate Workflow)
+# PART 2: TRANSLATE TAB
 
-## This is a COMPLETELY SEPARATE tab for translation only
+## Translate English subtitles to Hebrew (creates Subtitle_HEBREW folder)
 
-### Purpose
-Translate English SRT files to Hebrew and create a `Subtitle_HEBREW` folder.
-This prepares the files for the Pipeline tab.
-
-### Translate Tab - Input
-
-User selects TWO things:
-1. **Source Folder:** Folder containing English SRT files (can be anywhere)
+### Input
+1. **Source Folder:** English SRT files (any location)
 2. **Target Folder:** Season folder where `Subtitle_HEBREW` will be created
 
 ### Translate Tab - GUI Layout
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  [Pipeline]  [Translate]  [Settings]                         │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  ╔═══════════════════════════════════════════════════════╗  │
-│  ║              TRANSLATE TAB                             ║  │
-│  ╚═══════════════════════════════════════════════════════╝  │
-│                                                              │
 │  Source (English Subtitles)                                  │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │ Folder: [D:\Subtitles\ER\Season6_English  ] [Browse]│    │
-│  │         ┌─────────────────────────────────┐         │    │
-│  │         │  Drag and drop English SRT      │         │    │
-│  │         │  folder here                    │         │    │
-│  │         └─────────────────────────────────┘         │    │
-│  │                                                      │    │
 │  │ Found: 22 English SRT files                         │    │
 │  └─────────────────────────────────────────────────────┘    │
 │                                                              │
 │  Target (Where to create Subtitle_HEBREW)                    │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │ Folder: [G:\סדרות\ER\עונה 6               ] [Browse]│    │
-│  │         ┌─────────────────────────────────┐         │    │
-│  │         │  Drag and drop season folder    │         │    │
-│  │         │  here                           │         │    │
-│  │         └─────────────────────────────────┘         │    │
-│  │                                                      │    │
 │  │ Will create: G:\סדרות\ER\עונה 6\Subtitle_HEBREW\    │    │
 │  └─────────────────────────────────────────────────────┘    │
 │                                                              │
-│  Translation Options                                         │
+│  Progress                                                    │
+│  [████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░]  35%             │
+│                                                              │
+│  [Cancel]                                    [Translate All] │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Output
+
+```
+G:\סדרות\ER\עונה 6\
+├── 📁 Subtitle_HEBREW\              ← CREATED by Translate tab
+│   ├── ER - 6x01 - Leave It to Weaver.srt  (Hebrew)
+│   └── ...
+└── ...
+```
+
+---
+
+# PART 3: FULL PROCESS TAB (NEW!)
+
+## Complete workflow: English SRT → Final MKV with Hebrew subs
+
+This is the **"one-click" solution** for processing an entire season.
+
+### Input
+1. **Source Folder:** English SRT files
+2. **Target Folder:** Season folder with MKV files
+
+### Full Process - 4 Stages
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  STAGE 1: TRANSLATE                                         │
+│  English SRT → Hebrew SRT (Gemini API)                      │
+│  Creates: Subtitle_HEBREW/                                  │
+├─────────────────────────────────────────────────────────────┤
+│  STAGE 2: SYNC                                              │
+│  Align Hebrew subtitles to video audio (alass)              │
+├─────────────────────────────────────────────────────────────┤
+│  STAGE 3: RTL FIX                                           │
+│  Fix Hebrew punctuation (SubtitleEdit)                      │
+├─────────────────────────────────────────────────────────────┤
+│  STAGE 4: EMBED                                             │
+│  Merge subtitles into MKV (mkvmerge)                        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Full Process - GUI Layout
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  [Pipeline]  [Translate]  [Full Process]  [Settings]         │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ╔═══════════════════════════════════════════════════════╗  │
+│  ║   FULL PROCESS - Complete Workflow                     ║  │
+│  ║   English SRT → Translate → Sync → RTL → Embed         ║  │
+│  ╚═══════════════════════════════════════════════════════╝  │
+│                                                              │
+│  Source (English Subtitles)                                  │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │ ☑ Keep original filenames                           │    │
-│  │ ☐ Rename to match video files (if found)            │    │
+│  │ Folder: [D:\Subtitles\ER\Season6_English  ] [Browse]│    │
+│  │ Found: 22 English SRT files                         │    │
 │  └─────────────────────────────────────────────────────┘    │
 │                                                              │
-│  Progress                                                    │
+│  Target (Season folder with MKV files)                       │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │ [████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░]  35%      │    │
-│  │ Translating: ER - 6x08 - Great Expectations.srt     │    │
+│  │ Folder: [G:\סדרות\ER\עונה 6               ] [Browse]│    │
+│  │ Found: 22 MKV files                                 │    │
+│  │ Matched: 22/22 episodes ✓                           │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                              │
+│  Current Stage                                               │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │ ● Translate  ○ Sync  ○ RTL Fix  ○ Embed             │    │
+│  │                                                      │    │
+│  │ Overall: [████████░░░░░░░░░░░░░░░░░░░░░░]  28%      │    │
+│  │ Current: [██████████████░░░░░░░░░░░░░░░░]  45%      │    │
+│  │                                                      │    │
+│  │ Stage 1/4: Translating S06E10...                    │    │
 │  └─────────────────────────────────────────────────────┘    │
 │                                                              │
 │  Log                                                         │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │ [14:22:01] Starting translation...                  │    │
-│  │ [14:22:02] Found 22 SRT files                       │    │
-│  │ [14:22:15] ✓ ER - 6x01 translated (652 lines)      │    │
-│  │ [14:22:45] ✓ ER - 6x02 translated (589 lines)      │    │
-│  │ [14:23:12] ✓ ER - 6x03 translated (621 lines)      │    │
+│  │ [14:22:01] ═══ STAGE 1: TRANSLATION ═══             │    │
+│  │ [14:22:02] Found 22 English SRT files               │    │
+│  │ [14:22:15] ✓ 6x01 translated (643 lines)           │    │
+│  │ [14:22:45] ✓ 6x02 translated (589 lines)           │    │
 │  └─────────────────────────────────────────────────────┘    │
-│                                              [Clear Log]     │
 │                                                              │
-│  [Cancel]                                    [Translate All] │
+│  Options                                                     │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │ ☑ Delete temporary folders after completion         │    │
+│  │ ☐ Keep Subtitle_HEBREW folder (for manual review)   │    │
+│  │ ☐ Stop on first error                               │    │
+│  └─────────────────────────────────────────────────────┘    │
 │                                                              │
-│  ─────────────────────────────────────────────────────────  │
-│  💡 After translation, use the Pipeline tab to sync and     │
-│     embed the subtitles into your MKV files.                │
+│  [Cancel]                                [Start Full Process]│
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Translate Tab - Workflow
+### Full Process - Output
 
 ```
-User selects:
-├── Source: D:\Subtitles\ER\Season6_English\
-│   ├── ER - 6x01 - Leave It to Weaver.srt
-│   ├── ER - 6x02 - Last Rites.srt
+📁 Season Folder/
+├── 📁 Subtitle_HEBREW/    ← Created in Stage 1
+├── 📁 Output/             ← Final MKVs (Stage 4)
+│   ├── ER.1994.S06E01...mkv  (with Hebrew subs!)
 │   └── ...
-│
-└── Target: G:\סדרות\ER\עונה 6\
-
-Result:
-G:\סדרות\ER\עונה 6\
-├── 📁 Subtitle_HEBREW\              ← CREATED by Translate tab
-│   ├── ER - 6x01 - Leave It to Weaver.srt  (Hebrew)
-│   ├── ER - 6x02 - Last Rites.srt          (Hebrew)
-│   └── ...
-├── ER.1994.S06E01...mkv
 └── ...
-
-Now ready for Pipeline tab!
 ```
 
-### Translation Implementation (Gemini API)
+### Full Process - Time Estimate
+
+| Stage | Time per Episode |
+|-------|------------------|
+| Translate | ~1-2 minutes |
+| Sync | ~10 seconds |
+| RTL Fix | ~10 seconds |
+| Embed | ~10 seconds |
+| **Total** | **~2-3 minutes** |
+
+**Full season (22 episodes): ~45-60 minutes**
+
+---
+
+# PART 4: TRANSLATION PROMPT (CRITICAL!)
+
+## Use this EXACT prompt for high-quality Hebrew translation:
+
+```python
+TRANSLATION_PROMPT = """You are a professional Hebrew subtitle translator. Translate the following subtitles from English to Hebrew.
+
+## CRITICAL RULES:
+
+### 1. EVERYTHING IN HEBREW
+- Output must be 100% Hebrew characters
+- TRANSLITERATE all names to Hebrew:
+  - Brenner → ברנר
+  - John → ג'ון
+  - Elizabeth → אליזבת
+  - Michael → מייקל
+  - Dr. Green → ד"ר גרין
+  - Carter → קרטר
+  - Ross → רוס
+  - Rachel → רייצ'ל
+  - County General → קאונטי ג'נרל
+  
+- ONLY keep English for:
+  - Technical codes: DNA, HIV, CT, MRI, EKG
+  - Common abbreviations: OK
+
+### 2. GENDER DETECTION - VERY IMPORTANT!
+Analyze the context carefully to determine speaker gender:
+
+**Clues for FEMALE speaker:**
+- Words like "she", "her", "actress", "mother", "sister", "wife", "girlfriend", "nurse", "pregnant"
+- Female names: Elizabeth, Susan, Carol, Rachel, Abby, Kerry, Cynthia
+- Response to "ma'am", "miss", "Mrs."
+- Previous lines mentioning a woman
+
+**Clues for MALE speaker:**
+- Words like "he", "him", "actor", "father", "brother", "husband", "boyfriend"
+- Male names: John, Mark, Doug, Peter, Carter, Benton, Greene
+- Response to "sir", "Mr."
+- Previous lines mentioning a man
+
+**Use correct Hebrew verb forms:**
+- Female present: אני רוצָה, אני יודעַת, אני חושבת, אני עושָׂה
+- Male present: אני רוצֶה, אני יודֵע, אני חושב, אני עושֶׂה
+
+**When UNCLEAR:** Look at surrounding context. Default to male only if absolutely no hints.
+
+### 3. NATURAL HEBREW
+- Use conversational, natural Israeli Hebrew
+- Contractions are OK: מה קורה, איך הולך, תגיד לי, מה נשמע
+- Keep subtitles concise for quick reading
+- Medical drama tone: professional but human
+
+### 4. MEDICAL TERMS
+| English | Hebrew |
+|---------|--------|
+| Doctor / Dr. | דוקטור / ד"ר |
+| Nurse | אחות (f) / אח (m) |
+| Patient | מטופל / מטופלת |
+| ER / Emergency Room | חדר מיון |
+| Surgery | ניתוח |
+| Trauma | טראומה |
+| IV | עירוי |
+| Blood pressure | לחץ דם |
+| Heart rate | דופק |
+| Intubation | אינטובציה |
+| cc / ml | סמ"ק |
+| mg | מ"ג |
+| Stat! | מיד! / עכשיו! |
+| Code Blue | קוד כחול |
+| Crash cart | עגלת החייאה |
+
+{context_section}
+
+### TRANSLATE THESE {num_lines} LINES:
+{text_to_translate}
+
+### OUTPUT:
+Return exactly {num_lines} Hebrew translations, one per line, same order as input:"""
+```
+
+---
+
+# PART 5: TRANSLATION IMPLEMENTATION
 
 ```python
 import google.generativeai as genai
+import time
 import os
 import re
 
-GEMINI_API_KEY = "REDACTED_API_KEY"
+# Configuration - load from environment
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+GEMINI_MODEL = "gemini-2.0-flash"
 
 genai.configure(api_key=GEMINI_API_KEY)
 
-def translate_srt_file(input_path, output_path):
-    """
-    Translate a single SRT file from English to Hebrew.
-    """
-    # Read the SRT file
-    with open(input_path, 'r', encoding='utf-8') as f:
-        content = f.read()
+class Translator:
+    def __init__(self):
+        self.model = genai.GenerativeModel(GEMINI_MODEL)
+        self.batch_size = 20
+        self.context_lines = 10
+        self.delay_between_requests = 2  # seconds
     
-    # Parse SRT into blocks
-    blocks = parse_srt(content)
-    
-    # Translate in batches of 25 blocks for context
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    translated_blocks = []
-    
-    batch_size = 25
-    for i in range(0, len(blocks), batch_size):
-        batch = blocks[i:i + batch_size]
+    def translate_srt_file(self, input_path, output_path, progress_callback=None):
+        """Translate a single SRT file from English to Hebrew."""
         
-        # Include previous 5 blocks for context
-        context_start = max(0, i - 5)
-        context_blocks = blocks[context_start:i]
+        # Read and parse SRT
+        with open(input_path, 'r', encoding='utf-8') as f:
+            content = f.read()
         
-        translated_batch = translate_batch(model, batch, context_blocks)
-        translated_blocks.extend(translated_batch)
-    
-    # Rebuild SRT
-    output_content = build_srt(translated_blocks)
-    
-    # Write output
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(output_content)
-    
-    return len(blocks)
-
-def translate_batch(model, batch, context_blocks):
-    """
-    Translate a batch of subtitle blocks.
-    """
-    # Format subtitles for translation
-    text_to_translate = "\n".join([b['text'] for b in batch])
-    context_text = "\n".join([b['text'] for b in context_blocks]) if context_blocks else ""
-    
-    prompt = f"""Translate the following subtitles from English to Hebrew.
-
-CRITICAL RULES:
-1. ONLY translate the text, keep the EXACT same number of lines
-2. Pay attention to speaker GENDER from context:
-   - Use feminine forms (אמרה, הלכה, רצתה) when speaker is clearly female
-   - Use masculine forms (אמר, הלך, רצה) when speaker is clearly male
-3. Keep translations natural and conversational Hebrew
-4. Do NOT translate names - keep them in English
-5. Match the tone (formal/informal) of the original
-6. Keep translations concise - suitable for subtitles
-
-{f'CONTEXT (previous subtitles for reference, DO NOT translate these):' + chr(10) + context_text if context_text else ''}
-
-TRANSLATE THESE LINES (return {len(batch)} lines, one translation per line):
-{text_to_translate}
-
-Return ONLY the Hebrew translations, one per line, in the same order."""
-
-    response = model.generate_content(prompt)
-    translated_lines = response.text.strip().split('\n')
-    
-    # Match translations to blocks
-    for i, block in enumerate(batch):
-        if i < len(translated_lines):
-            block['text'] = translated_lines[i].strip()
-    
-    return batch
-
-def parse_srt(content):
-    """Parse SRT content into blocks."""
-    blocks = []
-    pattern = r'(\d+)\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n((?:.*(?:\n|$))*?)(?=\n\d+\n|\Z)'
-    
-    for match in re.finditer(pattern, content):
-        blocks.append({
-            'index': match.group(1),
-            'start': match.group(2),
-            'end': match.group(3),
-            'text': match.group(4).strip()
-        })
-    
-    return blocks
-
-def build_srt(blocks):
-    """Build SRT content from blocks."""
-    lines = []
-    for block in blocks:
-        lines.append(block['index'])
-        lines.append(f"{block['start']} --> {block['end']}")
-        lines.append(block['text'])
-        lines.append('')
-    
-    return '\n'.join(lines)
-
-def translate_folder(source_folder, target_folder, progress_callback=None):
-    """
-    Translate all SRT files from source folder.
-    Create Subtitle_HEBREW folder in target folder.
-    """
-    # Create output folder
-    output_folder = os.path.join(target_folder, "Subtitle_HEBREW")
-    os.makedirs(output_folder, exist_ok=True)
-    
-    # Find all SRT files
-    srt_files = [f for f in os.listdir(source_folder) if f.endswith('.srt')]
-    
-    results = []
-    for i, filename in enumerate(srt_files):
-        input_path = os.path.join(source_folder, filename)
-        output_path = os.path.join(output_folder, filename)
+        blocks = self.parse_srt(content)
+        total_batches = (len(blocks) + self.batch_size - 1) // self.batch_size
         
-        try:
-            lines_count = translate_srt_file(input_path, output_path)
-            results.append({
-                'file': filename,
-                'success': True,
-                'lines': lines_count
-            })
-        except Exception as e:
-            results.append({
-                'file': filename,
-                'success': False,
-                'error': str(e)
+        translated_blocks = []
+        
+        for i in range(0, len(blocks), self.batch_size):
+            batch = blocks[i:i + self.batch_size]
+            batch_num = i // self.batch_size + 1
+            
+            # Get context from previous blocks
+            context_start = max(0, i - self.context_lines)
+            context_blocks = blocks[context_start:i]
+            
+            # Translate with retry
+            translated = self.translate_batch_with_retry(batch, context_blocks)
+            translated_blocks.extend(translated)
+            
+            if progress_callback:
+                progress_callback(batch_num, total_batches)
+            
+            # Rate limit protection
+            time.sleep(self.delay_between_requests)
+        
+        # Build and save output
+        output_content = self.build_srt(translated_blocks)
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(output_content)
+        
+        return len(blocks)
+    
+    def translate_batch_with_retry(self, batch, context_blocks, max_retries=5):
+        """Translate a batch with retry logic."""
+        
+        text_to_translate = "\n".join([b['text'] for b in batch])
+        context_text = "\n".join([b['text'] for b in context_blocks]) if context_blocks else ""
+        
+        context_section = ""
+        if context_text:
+            context_section = f"""
+### CONTEXT (previous subtitles - DO NOT translate, use for gender/tone understanding):
+{context_text}
+"""
+        
+        prompt = TRANSLATION_PROMPT.format(
+            context_section=context_section,
+            num_lines=len(batch),
+            text_to_translate=text_to_translate
+        )
+        
+        for attempt in range(max_retries):
+            try:
+                response = self.model.generate_content(prompt)
+                translated_lines = response.text.strip().split('\n')
+                
+                # Match translations to blocks
+                for i, block in enumerate(batch):
+                    if i < len(translated_lines):
+                        block['text'] = translated_lines[i].strip()
+                
+                return batch
+                
+            except Exception as e:
+                error_str = str(e)
+                if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str:
+                    wait_time = 30 * (attempt + 1)
+                    print(f"Rate limited. Waiting {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    raise e
+        
+        raise Exception("Translation failed after max retries")
+    
+    def parse_srt(self, content):
+        """Parse SRT content into blocks."""
+        blocks = []
+        pattern = r'(\d+)\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n((?:.*(?:\n|$))*?)(?=\n\d+\n|\Z)'
+        
+        for match in re.finditer(pattern, content):
+            blocks.append({
+                'index': match.group(1),
+                'start': match.group(2),
+                'end': match.group(3),
+                'text': match.group(4).strip()
             })
         
-        if progress_callback:
-            progress_callback(i + 1, len(srt_files), filename)
+        return blocks
     
-    return results
+    def build_srt(self, blocks):
+        """Build SRT content from blocks."""
+        lines = []
+        for block in blocks:
+            lines.append(block['index'])
+            lines.append(f"{block['start']} --> {block['end']}")
+            lines.append(block['text'])
+            lines.append('')
+        
+        return '\n'.join(lines)
 ```
 
 ---
 
-# PART 3: COMPLETE GUI STRUCTURE
-
-## Three Tabs Layout
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Hebrew Subtitle Pipeline                            [─][□][×] │
-├─────────────────────────────────────────────────────────────┤
-│  [Pipeline]  [Translate]  [Settings]                         │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│     (Content changes based on selected tab)                  │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Tab 1: Pipeline (Original - unchanged)
-- Modes: Full Pipeline, Sync Only, RTL Fix Only, Embed Only
-- Input: Season folder with existing Subtitle_HEBREW
-- Output: MKV files with embedded subtitles
-
-### Tab 2: Translate (NEW)
-- Input: English SRT folder + Target season folder
-- Output: Creates Subtitle_HEBREW folder with Hebrew SRTs
-- No sync, no RTL fix, no embed - JUST translation
-
-### Tab 3: Settings
-- Tool paths (mkvmerge, SubtitleEdit, alass)
-- Gemini API key (pre-filled)
-- Subtitle settings (folder name, language code, etc.)
-- RTL fix settings (menu navigation steps)
-
----
-
-# PART 4: TYPICAL USER WORKFLOW
-
-## Complete Process (Using Both Tabs)
-
-### Step 1: Translate (Translate Tab)
-```
-User has:
-- English subtitles in: D:\Subtitles\ER\Season6_English\
-- Videos in: G:\סדרות\ER\עונה 6\
-
-1. Open "Translate" tab
-2. Source: D:\Subtitles\ER\Season6_English\
-3. Target: G:\סדרות\ER\עונה 6\
-4. Click "Translate All"
-5. Wait for completion
-
-Result: G:\סדרות\ER\עונה 6\Subtitle_HEBREW\ created with Hebrew SRTs
-```
-
-### Step 2: Process (Pipeline Tab)
-```
-1. Open "Pipeline" tab
-2. Input: G:\סדרות\ER\עונה 6\
-3. Mode: Full Pipeline (Sync → RTL Fix → Embed)
-4. Click "Run Pipeline"
-5. Wait for completion
-
-Result: G:\סדרות\ER\עונה 6\Output\ created with final MKVs
-```
-
----
-
-# PART 5: TECHNICAL IMPLEMENTATION
-
-## RTL Fix with SubtitleEdit (GUI Automation)
+# PART 6: RTL FIX (SubtitleEdit Automation)
 
 ```python
 from pywinauto import Application
 import time
+import shutil
 
 def fix_rtl_with_subtitleedit(srt_path, subtitleedit_path="C:\\Program Files\\Subtitle Edit\\SubtitleEdit.exe"):
     """
@@ -444,7 +497,7 @@ def fix_rtl_with_subtitleedit(srt_path, subtitleedit_path="C:\\Program Files\\Su
         time.sleep(0.3)
         
         # Navigate to "Reverse RTL start/end (for selected lines)"
-        for _ in range(11):  # Adjust if needed
+        for _ in range(11):  # Adjust in settings if needed
             main_window.type_keys('{DOWN}')
             time.sleep(0.05)
         main_window.type_keys('{ENTER}')
@@ -457,17 +510,31 @@ def fix_rtl_with_subtitleedit(srt_path, subtitleedit_path="C:\\Program Files\\Su
         # Close (Alt+F4)
         main_window.type_keys('%{F4}')
         
+        # Handle save dialog if appears
+        try:
+            time.sleep(0.3)
+            app.window(title_re=".*").type_keys('n')
+        except:
+            pass
+        
         return True
         
     except Exception as e:
         print(f"RTL fix error: {e}")
+        try:
+            app.kill()
+        except:
+            pass
         return False
 ```
 
-## Episode Matching
+---
+
+# PART 7: EPISODE MATCHING
 
 ```python
 import re
+import os
 
 def extract_episode_number(filename):
     """Extract season and episode from filename."""
@@ -487,12 +554,23 @@ def extract_episode_number(filename):
 
 def match_files(mkv_folder, srt_folder):
     """Match MKV files with SRT files by episode number."""
-    mkv_files = {extract_episode_number(f): f for f in os.listdir(mkv_folder) if f.endswith('.mkv')}
-    srt_files = {extract_episode_number(f): f for f in os.listdir(srt_folder) if f.endswith('.srt')}
+    mkv_files = {}
+    for f in os.listdir(mkv_folder):
+        if f.endswith('.mkv'):
+            ep = extract_episode_number(f)
+            if ep:
+                mkv_files[ep] = f
+    
+    srt_files = {}
+    for f in os.listdir(srt_folder):
+        if f.endswith('.srt'):
+            ep = extract_episode_number(f)
+            if ep:
+                srt_files[ep] = f
     
     matches = []
     for ep_num, mkv_file in mkv_files.items():
-        if ep_num and ep_num in srt_files:
+        if ep_num in srt_files:
             matches.append({
                 'episode': ep_num,
                 'mkv': mkv_file,
@@ -504,7 +582,147 @@ def match_files(mkv_folder, srt_folder):
 
 ---
 
-# PART 6: PROJECT STRUCTURE
+# PART 8: FULL PROCESS IMPLEMENTATION
+
+```python
+import subprocess
+import shutil
+
+def run_full_process(english_srt_folder, season_folder, config, progress_callback=None, log_callback=None):
+    """
+    Complete workflow: Translate → Sync → RTL Fix → Embed
+    """
+    
+    def log(message):
+        if log_callback:
+            log_callback(message)
+        print(message)
+    
+    # ═══════════════════════════════════════════════════════
+    # STAGE 1: TRANSLATION
+    # ═══════════════════════════════════════════════════════
+    log("═══ STAGE 1: TRANSLATION ═══")
+    
+    hebrew_srt_folder = os.path.join(season_folder, "Subtitle_HEBREW")
+    os.makedirs(hebrew_srt_folder, exist_ok=True)
+    
+    english_files = [f for f in os.listdir(english_srt_folder) if f.endswith('.srt')]
+    translator = Translator()
+    
+    for i, filename in enumerate(english_files):
+        input_path = os.path.join(english_srt_folder, filename)
+        output_path = os.path.join(hebrew_srt_folder, filename)
+        
+        log(f"Translating {filename}...")
+        try:
+            lines = translator.translate_srt_file(input_path, output_path)
+            log(f"✓ {filename} translated ({lines} lines)")
+        except Exception as e:
+            log(f"✗ {filename} failed: {e}")
+        
+        if progress_callback:
+            progress_callback(stage=1, current=i+1, total=len(english_files))
+    
+    # ═══════════════════════════════════════════════════════
+    # STAGE 2: SYNC
+    # ═══════════════════════════════════════════════════════
+    log("═══ STAGE 2: SYNC ═══")
+    
+    matches = match_files(season_folder, hebrew_srt_folder)
+    synced_folder = os.path.join(season_folder, "temp_synced")
+    os.makedirs(synced_folder, exist_ok=True)
+    
+    for i, match in enumerate(matches):
+        mkv_path = os.path.join(season_folder, match['mkv'])
+        srt_path = os.path.join(hebrew_srt_folder, match['srt'])
+        synced_path = os.path.join(synced_folder, match['srt'])
+        
+        log(f"Syncing {match['srt']}...")
+        result = subprocess.run([
+            config.alass_path, mkv_path, srt_path, synced_path
+        ], capture_output=True)
+        
+        if result.returncode == 0:
+            log(f"✓ {match['srt']} synced")
+        else:
+            log(f"✗ {match['srt']} sync failed")
+            shutil.copy(srt_path, synced_path)  # Use original if sync fails
+        
+        if progress_callback:
+            progress_callback(stage=2, current=i+1, total=len(matches))
+    
+    # ═══════════════════════════════════════════════════════
+    # STAGE 3: RTL FIX
+    # ═══════════════════════════════════════════════════════
+    log("═══ STAGE 3: RTL FIX ═══")
+    
+    rtl_folder = os.path.join(season_folder, "temp_rtl_fixed")
+    os.makedirs(rtl_folder, exist_ok=True)
+    
+    synced_files = [f for f in os.listdir(synced_folder) if f.endswith('.srt')]
+    
+    for i, filename in enumerate(synced_files):
+        src = os.path.join(synced_folder, filename)
+        dst = os.path.join(rtl_folder, filename)
+        shutil.copy(src, dst)
+        
+        log(f"Fixing RTL for {filename}...")
+        if fix_rtl_with_subtitleedit(dst, config.subtitleedit_path):
+            log(f"✓ {filename} RTL fixed")
+        else:
+            log(f"✗ {filename} RTL fix failed")
+        
+        if progress_callback:
+            progress_callback(stage=3, current=i+1, total=len(synced_files))
+    
+    # ═══════════════════════════════════════════════════════
+    # STAGE 4: EMBED
+    # ═══════════════════════════════════════════════════════
+    log("═══ STAGE 4: EMBED ═══")
+    
+    output_folder = os.path.join(season_folder, "Output")
+    os.makedirs(output_folder, exist_ok=True)
+    
+    for i, match in enumerate(matches):
+        mkv_path = os.path.join(season_folder, match['mkv'])
+        srt_path = os.path.join(rtl_folder, match['srt'])
+        output_path = os.path.join(output_folder, match['mkv'])
+        
+        log(f"Embedding into {match['mkv']}...")
+        result = subprocess.run([
+            config.mkvmerge_path,
+            "-o", output_path,
+            mkv_path,
+            "--language", "0:heb",
+            "--track-name", "0:Hebrew",
+            "--default-track", "0:yes",
+            srt_path
+        ], capture_output=True)
+        
+        if result.returncode == 0:
+            log(f"✓ {match['mkv']} complete")
+        else:
+            log(f"✗ {match['mkv']} embed failed")
+        
+        if progress_callback:
+            progress_callback(stage=4, current=i+1, total=len(matches))
+    
+    # ═══════════════════════════════════════════════════════
+    # CLEANUP
+    # ═══════════════════════════════════════════════════════
+    if not config.keep_temp_files:
+        shutil.rmtree(synced_folder, ignore_errors=True)
+        shutil.rmtree(rtl_folder, ignore_errors=True)
+    
+    log("═══ FULL PROCESS COMPLETE ═══")
+    log(f"Output folder: {output_folder}")
+    
+    return {'success': True, 'output_folder': output_folder}
+```
+
+---
+
+# PART 9: PROJECT STRUCTURE
 
 ```
 G:\Projects\SubtitlePipeline\
@@ -512,31 +730,32 @@ G:\Projects\SubtitlePipeline\
 │   └── alass.exe
 ├── src/
 │   ├── __init__.py
-│   ├── main.py              # Entry point + GUI (3 tabs)
+│   ├── main.py                  # Entry point + GUI
 │   ├── gui/
 │   │   ├── __init__.py
-│   │   ├── pipeline_tab.py  # Pipeline tab UI
-│   │   ├── translate_tab.py # Translate tab UI (NEW)
-│   │   └── settings_tab.py  # Settings tab UI
+│   │   ├── pipeline_tab.py      # Pipeline tab
+│   │   ├── translate_tab.py     # Translate tab
+│   │   ├── full_process_tab.py  # Full Process tab (NEW)
+│   │   └── settings_tab.py      # Settings tab
 │   ├── core/
 │   │   ├── __init__.py
-│   │   ├── translator.py    # Gemini translation (NEW)
-│   │   ├── syncer.py        # alass sync
-│   │   ├── rtl_fixer.py     # SubtitleEdit automation
-│   │   ├── muxer.py         # mkvmerge embedding
-│   │   └── matcher.py       # Episode matching
-│   └── config.py            # Settings management
+│   │   ├── translator.py        # Gemini translation
+│   │   ├── syncer.py            # alass sync
+│   │   ├── rtl_fixer.py         # SubtitleEdit automation
+│   │   ├── muxer.py             # mkvmerge embedding
+│   │   ├── matcher.py           # Episode matching
+│   │   └── full_process.py      # Full process orchestration (NEW)
+│   └── config.py                # Settings management
 ├── temp/
 ├── dist/
 ├── config.yaml
 ├── requirements.txt
-├── CLAUDE.md
-└── README.md
+└── CLAUDE.md
 ```
 
 ---
 
-# PART 7: CONFIGURATION
+# PART 10: CONFIGURATION
 
 ## config.yaml
 
@@ -547,8 +766,8 @@ tools:
   alass: "G:/Projects/SubtitlePipeline/tools/alass.exe"
 
 api:
-  gemini_key: "REDACTED_API_KEY"
-  gemini_model: "gemini-1.5-flash"
+  # API key loaded from .env file (GEMINI_API_KEY environment variable)
+  gemini_model: "gemini-2.0-flash"
 
 subtitle:
   folder_name: "Subtitle_HEBREW"
@@ -558,8 +777,9 @@ subtitle:
   default_track: true
 
 translation:
-  batch_size: 25
-  context_lines: 5
+  batch_size: 20
+  context_lines: 10
+  delay_between_requests: 2
 
 rtl:
   menu_steps: 11
@@ -580,9 +800,7 @@ pyinstaller>=5.0
 
 ---
 
-# PART 8: BUILD & DISTRIBUTION
-
-## Build Standalone EXE
+# PART 11: BUILD EXE
 
 ```bash
 pip install pyinstaller
@@ -593,54 +811,32 @@ Output: `G:\Projects\SubtitlePipeline\dist\HebrewSubtitlePipeline.exe`
 
 ---
 
-# PART 9: TESTING CHECKLIST
+# PART 12: TESTING CHECKLIST
 
-## Translate Tab Tests
-- [ ] Gemini API connects successfully
-- [ ] Single SRT file translates correctly
-- [ ] Batch of 22 files translates without errors
-- [ ] Gender context is respected (feminine/masculine)
-- [ ] Subtitle_HEBREW folder is created in correct location
-- [ ] Original filenames are preserved
-- [ ] Progress bar updates correctly
-- [ ] Errors are logged but don't crash
+## Translation Tests
+- [ ] API connects (new paid key)
+- [ ] Model is gemini-1.5-flash (NOT 2.0)
+- [ ] Names transliterated (Brenner → ברנר)
+- [ ] Gender detection works
+- [ ] No rate limit errors
+- [ ] 100% Hebrew output (except DNA, CT, OK)
 
-## Pipeline Tab Tests (Original)
-- [ ] Episode matching S06E01 ↔ 6x01 works
-- [ ] alass sync aligns subtitles
-- [ ] RTL fix: `.אני רופא` (dot at beginning)
-- [ ] MKV has Hebrew track with correct language
-- [ ] Batch processing 20+ files works
-- [ ] Each mode works independently
+## Pipeline Tests
+- [ ] Episode matching S06E01 ↔ 6x01
+- [ ] alass sync works
+- [ ] RTL fix: punctuation at start (`.שלום`)
+- [ ] MKV has Hebrew track
+
+## Full Process Tests
+- [ ] All 4 stages run in sequence
+- [ ] Progress updates correctly
+- [ ] Temp folders cleaned up
+- [ ] Final MKVs in Output/
 
 ## General Tests
-- [ ] All 3 tabs switch correctly
-- [ ] Settings are saved and loaded
-- [ ] EXE runs without Python installed
-- [ ] Tool verification works
-
----
-
-# PART 10: FIRST STEPS FOR CLAUDE CODE
-
-1. **Test Gemini API:**
-   ```python
-   import google.generativeai as genai
-   genai.configure(api_key="REDACTED_API_KEY")
-   model = genai.GenerativeModel('gemini-1.5-flash')
-   response = model.generate_content("Translate 'Hello, how are you?' to Hebrew")
-   print(response.text)
-   ```
-
-2. **Create project structure**
-
-3. **Build Translate tab first** (it's independent)
-
-4. **Then update Pipeline tab** to work alongside
-
-5. **Test on ONE episode** before batch
-
-6. **Build EXE last**
+- [ ] All 4 tabs work
+- [ ] Settings saved/loaded
+- [ ] EXE runs standalone
 
 ---
 
@@ -648,8 +844,7 @@ Output: `G:\Projects\SubtitlePipeline\dist\HebrewSubtitlePipeline.exe`
 
 | Tab | Input | Process | Output |
 |-----|-------|---------|--------|
-| **Translate** | English SRT folder + Season folder | Gemini API translation | `Subtitle_HEBREW/` with Hebrew SRTs |
-| **Pipeline** | Season folder (with Subtitle_HEBREW) | Sync → RTL Fix → Embed | `Output/` with final MKVs |
-| **Settings** | N/A | Configuration | Saved to config.yaml |
-
-**The two tabs are INDEPENDENT and do NOT interfere with each other.**
+| **Pipeline** | Season folder + Subtitle_HEBREW | Sync → RTL → Embed | Output/ with MKVs |
+| **Translate** | English SRT folder → Season folder | Gemini translation | Subtitle_HEBREW/ |
+| **Full Process** | English SRT folder + Season folder | Translate → Sync → RTL → Embed | Output/ with MKVs |
+| **Settings** | N/A | Configuration | config.yaml |
