@@ -1,0 +1,17 @@
+tools:
+  mkvmerge: "C:/Program Files/MKVToolNix/mkvmerge.exe"
+  alass: "G:/Projects/SubtitlePipeline/tools/alass-windows64/alass-windows64/bin/alass-cli.exe"
+  subtitle_edit: "C:/Program Files/Subtitle Edit/SubtitleEdit.exe"
+  ffmpeg: "C:/ffmpeg/bin/ffmpeg.exe"
+
+settings:
+  subtitle_folder_name: "Subtitle_HEBREW"
+  output_folder_name: "Output"
+  subtitle_language: "heb"
+  subtitle_track_name: "Hebrew"
+  default_subtitle: true
+
+processing:
+  sync_engine: "alass"
+  fix_rtl: true
+  keep_temp_files: false
